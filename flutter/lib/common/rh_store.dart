@@ -6,7 +6,7 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/platform_model.dart';
-import 'common.dart';
+import 'package:flutter_hbb/common.dart';
 
 /// 仁和堂门店配置与同步服务。
 ///

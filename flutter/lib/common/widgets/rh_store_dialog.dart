@@ -68,7 +68,7 @@ void showRhStoreSetupDialog() {
       );
     }
 
-    Widget dialog = AlertDialog(
+    CustomAlertDialog dialog = CustomAlertDialog(
       title: const Text('首次启动配置'),
       content: SingleChildScrollView(
         child: Column(
