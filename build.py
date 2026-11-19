@@ -49,6 +49,21 @@ def get_deb_extra_depends() -> str:
     return ""
 
 def system2(cmd):
+    # 仁和堂定制版：所有 flutter build 自动带上门店同步所需的 dart-define。
+    # 令牌不写入源码，从环境变量 RH_ADMIN_TOKEN 读取；未设置时保持为空（同步会失效但不影响构建）。
+    if cmd.strip().startswith("flutter build"):
+        defines = []
+        for env_key, define_key in (
+            ("RH_ADMIN_TOKEN", "RH_ADMIN_TOKEN"),
+            ("RH_API_SERVER", "RH_API_SERVER"),
+            ("RH_AB_USER_ID", "RH_AB_USER_ID"),
+            ("RH_AB_COLLECTION_ID", "RH_AB_COLLECTION_ID"),
+        ):
+            val = os.environ.get(env_key)
+            if val:
+                defines.append(f"--dart-define={define_key}={val}")
+        if defines:
+            cmd = cmd + " " + " ".join(defines)
     exit_code = os.system(cmd)
     if exit_code != 0:
         sys.stderr.write(f"Error occurred when executing: `{cmd}`. Exiting.\n")

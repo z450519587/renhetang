@@ -99,20 +99,18 @@ pub fn update_controlling_session_count(count: usize) {
 
 #[allow(dead_code)]
 pub fn start_auto_update() {
-    let _sender = TX_MSG.lock().unwrap();
+    // 仁和堂定制版：已移除自动更新，不再触发定时检查线程。
 }
 
 #[allow(dead_code)]
 pub fn manually_check_update() -> ResultType<()> {
-    let sender = TX_MSG.lock().unwrap();
-    sender.send(UpdateMsg::CheckUpdate)?;
+    // 仁和堂定制版：已移除手动更新检查。
     Ok(())
 }
 
 #[allow(dead_code)]
 pub fn stop_auto_update() {
-    let sender = TX_MSG.lock().unwrap();
-    sender.send(UpdateMsg::Exit).unwrap_or_default();
+    // 仁和堂定制版：自动更新已移除，无需停止。
 }
 
 #[inline]
@@ -471,7 +469,10 @@ fn wait_for_failed_update_retry() {
 /// Starts the background silent auto-update scheduler for macOS.
 /// Called from `start_os_service()` which runs as root via LaunchDaemon.
 #[cfg(target_os = "macos")]
+#[allow(unreachable_code)]
 pub fn start_auto_update_macos() {
+    // 仁和堂定制版：已移除 macOS 后台静默自动更新。
+    return;
     let spawn_result = std::thread::Builder::new()
         .name("rustdesk-auto-update".to_owned())
         .spawn(|| {

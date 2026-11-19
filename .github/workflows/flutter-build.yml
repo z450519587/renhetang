@@ -61,6 +61,11 @@ env:
   UPLOAD_ARTIFACT: "${{ inputs.upload-artifact }}"
   PUBLISH_UPDATE_METADATA: "${{ inputs.publish-update-metadata }}"
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}-2"
+  # 仁和堂定制版：门店名同步所需的构建参数，令牌从仓库 Secrets 读取，绝不写入源码。
+  RH_ADMIN_TOKEN: "${{ secrets.RH_ADMIN_TOKEN }}"
+  RH_API_SERVER: "${{ secrets.RH_API_SERVER }}"
+  RH_AB_USER_ID: "${{ secrets.RH_AB_USER_ID }}"
+  RH_AB_COLLECTION_ID: "${{ secrets.RH_AB_COLLECTION_ID }}"
 
 jobs:
   validate-update-metadata-keys:
