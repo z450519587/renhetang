@@ -16,59 +16,60 @@ Future<void> rhStoreBootstrap() async {
 
 /// 首次启动门店配置弹窗。
 ///
-/// 特性：
-/// - 模态且不可跳过：不提供取消/关闭按钮，点遮罩与返回键默认不关闭
-///   （gFFI.dialogManager.show 默认 clickMaskDismiss/backDismiss 均为 false）。
-/// - 仅店名一项：不展示 API 服务器地址与 Token 输入（服务端参数走构建注入）。
-/// - 非空校验：留空时提示且禁止提交。
-/// - 失败可重试：同步失败展示错误并允许再次提交。
+/// 注意：gFFI.dialogManager.show 内部用 StatefulBuilder，每次 setState 都会
+/// 重新执行这里传入的 builder。因此输入框、提交状态、错误信息必须定义在
+/// builder 外面，否则一点按钮就会被重置，表现为“点了没反应”。
 void showRhStoreSetupDialog() {
-  gFFI.dialogManager.show((setState, close, context) {
-    final ctrl = TextEditingController();
-    String errMsg = '';
-    bool submitting = false;
+  final ctrl = TextEditingController();
+  String errMsg = '';
+  bool submitting = false;
+  bool closed = false;
+  StateSetter? refreshDialog;
+  void Function([dynamic])? rawClose;
 
-    Future<void> submit() async {
-      final name = ctrl.text.trim();
-      if (name.isEmpty) {
-        setState(() => errMsg = '店名不能为空');
-        return;
-      }
-      setState(() {
-        submitting = true;
-        errMsg = '';
+  void refresh(VoidCallback fn) {
+    if (!closed) refreshDialog?.call(fn);
+  }
+
+  void finish([dynamic res]) {
+    if (closed) return;
+    closed = true;
+    rawClose?.call(res);
+    ctrl.dispose();
+  }
+
+  Future<void> submit() async {
+    if (submitting || closed) return;
+    final name = ctrl.text.trim();
+    if (name.isEmpty) {
+      refresh(() => errMsg = '店名不能为空');
+      return;
+    }
+
+    refresh(() {
+      submitting = true;
+      errMsg = '';
+    });
+
+    final result = await RhStoreService.instance.submitStoreName(name);
+    if (closed) return;
+
+    if (result.ok) {
+      finish();
+      showToast('店名已同步到仁和堂服务器');
+    } else {
+      refresh(() {
+        submitting = false;
+        errMsg = result.error.isEmpty ? '同步失败，请重试' : result.error;
       });
-      final result = await RhStoreService.instance.submitStoreName(name);
-      if (!context.mounted) return;
-      if (result.ok) {
-        close();
-      } else {
-        setState(() {
-          submitting = false;
-          errMsg = '${result.error}，请重试';
-        });
-      }
     }
+  }
 
-    Widget buildInput() {
-      return TextField(
-        controller: ctrl,
-        autofocus: true,
-        enabled: !submitting,
-        decoration: InputDecoration(
-          labelText: '门店名称',
-          hintText: RhStoreConfig.storeNamePlaceholder,
-          errorText: errMsg.isEmpty ? null : errMsg,
-          border: const OutlineInputBorder(),
-        ),
-        onChanged: (_) {
-          if (errMsg.isNotEmpty) setState(() => errMsg = '');
-        },
-        onSubmitted: (_) => submitting ? null : submit(),
-      );
-    }
+  gFFI.dialogManager.show((setState, close, context) {
+    refreshDialog = setState;
+    rawClose = close;
 
-    CustomAlertDialog dialog = CustomAlertDialog(
+    return CustomAlertDialog(
       title: const Text('首次启动配置'),
       content: SingleChildScrollView(
         child: Column(
@@ -77,7 +78,21 @@ void showRhStoreSetupDialog() {
           children: [
             const Text('请输入本店店名，用于远程工具标识与通讯录显示。'),
             const SizedBox(height: 16),
-            buildInput(),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              enabled: !submitting,
+              decoration: InputDecoration(
+                labelText: '门店名称',
+                hintText: RhStoreConfig.storeNamePlaceholder,
+                errorText: errMsg.isEmpty ? null : errMsg,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) {
+                if (errMsg.isNotEmpty) refresh(() => errMsg = '');
+              },
+              onSubmitted: (_) => submit(),
+            ),
             const SizedBox(height: 12),
             if (submitting)
               const Row(
@@ -96,13 +111,10 @@ void showRhStoreSetupDialog() {
       ),
       actions: [
         ElevatedButton(
-          onPressed: submitting ? null : () => submit(),
+          onPressed: submitting ? null : submit,
           child: const Text('确认并同步'),
         ),
       ],
     );
-
-    // 桌面端套用统一弹窗外观（项目内 CustomAlertDialog 提供的视觉风格）。
-    return dialog;
   });
 }
