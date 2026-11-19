@@ -4,8 +4,11 @@
 // future. If not, the values below would default to using the project name when this becomes a
 // 'flutter create' template.
 
-// The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = 仁和堂专用远程工具
+// Keep the bundle file name as RustDesk.app: build scripts and daemon plist paths
+// hardcode this name. The user-visible app name is set below via CFBundleDisplayName.
+PRODUCT_NAME = RustDesk
+INFOPLIST_KEY_CFBundleDisplayName = 仁和堂专用远程工具
+INFOPLIST_KEY_CFBundleName = 仁和堂专用远程工具
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = com.carriez.flutterHbb
