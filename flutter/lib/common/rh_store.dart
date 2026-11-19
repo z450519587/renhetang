@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -124,6 +125,47 @@ class RhStoreService {
     return json;
   }
 
+  /// 所有后台请求都带硬超时，避免服务端无响应时界面永久“没反应”。
+  static const Duration _requestTimeout = Duration(seconds: 15);
+
+  Future<http.Response> _get(Uri url) async {
+    try {
+      return await http.get(url, headers: _headers()).timeout(_requestTimeout);
+    } on TimeoutException catch (_) {
+      throw '请求服务器超时，请检查网络后重试';
+    }
+  }
+
+  Future<http.Response> _post(Uri url, Map<String, dynamic> body) async {
+    try {
+      return await http
+          .post(url, headers: _headers(), body: jsonEncode(body))
+          .timeout(_requestTimeout);
+    } on TimeoutException catch (_) {
+      throw '请求服务器超时，请检查网络后重试';
+    }
+  }
+
+  /// 后台列表接口 data 形态兼容：{"list":[...]}、{"data":[...]}、[...]。
+  List<dynamic> _rowsFromAdminJson(dynamic json) {
+    final data = json is Map<String, dynamic> ? json['data'] : null;
+    if (data is Map<String, dynamic>) {
+      return (data['list'] as List?) ?? (data['data'] as List?) ?? const [];
+    }
+    if (data is List) return data;
+    return const [];
+  }
+
+  /// 首次启动时 Rust 后端可能还没生成设备 ID，轮询等待，避免拿到空 ID。
+  Future<String> _waitForMyId() async {
+    for (var i = 0; i < 30; i++) {
+      final id = (await bind.mainGetMyId()).trim();
+      if (id.isNotEmpty) return id;
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+    throw '未获取到本机设备 ID，请稍后重试';
+  }
+
   // ---------- 本地持久化 ----------
 
   Future<String> getStoreName() async =>
@@ -196,17 +238,9 @@ class RhStoreService {
       'page': '1',
       'pageSize': '10',
     });
-    final resp = await http.get(url, headers: _headers());
+    final resp = await _get(url);
     final json = _checkAdminResponse(resp, '查询通讯录');
-    final data = (json is Map<String, dynamic> ? json['data'] : null);
-    // data 形态可能是 {"list":[...]} 或直接 [...]（依服务端版本）。
-    List? rows;
-    if (data is Map<String, dynamic>) {
-      rows = data['list'] as List? ?? data['data'] as List?;
-    } else if (data is List) {
-      rows = data;
-    }
-    for (final item in rows ?? []) {
+    for (final item in _rowsFromAdminJson(json)) {
       if (item is! Map<String, dynamic>) continue;
       if ((item['id'] ?? '').toString() == deviceId) return item;
     }
@@ -239,9 +273,14 @@ class RhStoreService {
     final url = Uri.parse(existing == null
         ? '$base/api/admin/address_book/create'
         : '$base/api/admin/address_book/update');
-    final resp = await http.post(url,
-        headers: _headers(), body: jsonEncode(bodyMap));
+    final resp = await _post(url, bodyMap);
     _checkAdminResponse(resp, '写入通讯录');
+
+    // 回读校验：确保店名确实以 UTF-8 写进了 alias，而不是只返回成功码。
+    final verify = await _findAbRow(rec.deviceId);
+    if (verify == null || (verify['alias'] ?? '').toString() != rec.name) {
+      throw '通讯录写入后校验未通过，请重试';
+    }
   }
 
   // ---------- 设备管理写入（后台管理 API） ----------
@@ -251,9 +290,9 @@ class RhStoreService {
   // 见 http/controller/admin/peer.go。写入 alias = 店名，与通讯录保持一致。
 
   /// 把店名写入设备管理（按设备 ID 匹配，更新其 alias 字段）。
-  /// 设备管理的"设备自动同步到通讯簿"由 [upsertPeer] 完成（同一设备 ID 写入
-  /// address_book 集合），此处只负责设备侧别名，失败不影响通讯录主流程。
-  Future<void> writeDeviceInfo(String deviceId, RhStoreRecord rec) async {
+  /// 返回 null 表示成功；返回字符串表示失败原因，由弹窗直接展示，
+  /// 不再静默跳过，确保用户能明确知道别名没有写进去。
+  Future<String?> writeDeviceInfo(String deviceId, RhStoreRecord rec) async {
     try {
       final base = await apiServer;
       final listUrl =
@@ -262,17 +301,11 @@ class RhStoreService {
         'page': '1',
         'pageSize': '10',
       });
-      final listResp = await http.get(listUrl, headers: _headers());
+      final listResp = await _get(listUrl);
       final listJson = _checkAdminResponse(listResp, '查询设备管理');
-      final data = listJson is Map<String, dynamic> ? listJson['data'] : null;
-      List? rows;
-      if (data is Map<String, dynamic>) {
-        rows = data['list'] as List? ?? data['data'] as List?;
-      } else if (data is List) {
-        rows = data;
-      }
+
       Map<String, dynamic>? deviceRow;
-      for (final item in rows ?? []) {
+      for (final item in _rowsFromAdminJson(listJson)) {
         if (item is Map<String, dynamic> &&
             (item['id'] ?? '').toString() == deviceId) {
           deviceRow = item;
@@ -280,21 +313,31 @@ class RhStoreService {
         }
       }
       if (deviceRow == null) {
-        debugPrint('rh_store: 设备管理未找到 $deviceId，跳过设备别名写入');
-        return;
+        return '设备管理未找到设备 $deviceId，请确认设备已连接专属服务器后重试';
       }
-      final body = jsonEncode({
+
+      final body = <String, dynamic>{
         'row_id': deviceRow['row_id'],
         'id': deviceId,
         'alias': rec.name,
-      });
+      };
       final updateUrl = Uri.parse('$base/api/admin/peer/update');
-      final resp = await http.post(updateUrl,
-          headers: _headers(), body: body);
+      final resp = await _post(updateUrl, body);
       _checkAdminResponse(resp, '写入设备管理');
+
+      // 回读校验：确认 alias 真的写进去了。
+      final verifyResp = await _get(listUrl);
+      final verifyJson = _checkAdminResponse(verifyResp, '校验设备管理');
+      for (final item in _rowsFromAdminJson(verifyJson)) {
+        if (item is Map<String, dynamic> &&
+            (item['id'] ?? '').toString() == deviceId) {
+          if ((item['alias'] ?? '').toString() == rec.name) return null;
+          return '设备管理别名校验未通过，请重试';
+        }
+      }
+      return '设备管理别名校验未通过，请重试';
     } catch (e) {
-      // 设备侧失败不阻断通讯录主流程。
-      debugPrint('rh_store writeDeviceInfo: $e');
+      return '写入设备管理失败：$e';
     }
   }
 
@@ -306,8 +349,7 @@ class RhStoreService {
     if (name.isEmpty) return SyncResult.failure('店名不能为空');
 
     try {
-      final deviceId = await bind.mainGetMyId();
-      if (deviceId.isEmpty) return SyncResult.failure('未获取到本机设备 ID');
+      final deviceId = await _waitForMyId();
 
       // 恢复逻辑：若本地已有该设备记录（含备注），优先沿用本地备注；
       // 否则尝试从通讯录取回备注，实现「被删除门店再次同步时恢复展示」。
@@ -326,7 +368,8 @@ class RhStoreService {
 
       // 双向同步：共享通讯录（address_book）+ 设备管理（peer）。
       await upsertPeer(rec);
-      await writeDeviceInfo(deviceId, rec);
+      final deviceError = await writeDeviceInfo(deviceId, rec);
+      if (deviceError != null) return SyncResult.failure(deviceError);
 
       // 成功后持久化到本地，后续不再弹窗。
       await setStoreName(name);
@@ -344,9 +387,9 @@ class RhStoreService {
   Future<void> syncOnStart() async {
     if (!await isSetupDone()) return;
     try {
-      final deviceId = await bind.mainGetMyId();
+      final deviceId = await _waitForMyId();
       final name = await getStoreName();
-      if (deviceId.isEmpty || name.isEmpty) return;
+      if (name.isEmpty) return;
 
       final remoteRow = await _findAbRow(deviceId);
       final cached = await loadCache();
@@ -360,7 +403,8 @@ class RhStoreService {
         final rec = RhStoreRecord(
             deviceId: deviceId, name: local.name, note: local.note);
         await upsertPeer(rec);
-        await writeDeviceInfo(deviceId, rec);
+        final err = await writeDeviceInfo(deviceId, rec);
+        if (err != null) debugPrint('rh_store syncOnStart: $err');
       } else {
         // 远程存在：以远程 alias 为准确认门店名，并回填本地（双向同步另一方向）。
         final remoteAlias = (remoteRow['alias'] ?? '').toString();
