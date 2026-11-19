@@ -421,31 +421,51 @@ class RhStoreService {
   }
 }
 
-/// 主界面右上角店名标签：跟随 [RhStoreService.currentStoreName] 刷新。
-/// 长店名省略显示，宽度受限，不影响相邻控件布局。
-class StoreNameLabel extends StatelessWidget {
-  const StoreNameLabel({Key? key}) : super(key: key);
+/// 首页右侧品牌区：上方 logo、下方店名。
+/// 使用原有文字颜色来源，店名字号放大并限制单行省略。
+class StoreNameHomeBadge extends StatelessWidget {
+  const StoreNameHomeBadge({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return Obx(() {
       final name = RhStoreService.currentStoreName.value.trim();
-      if (name.isEmpty) return const Offstage();
-      return ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 180),
-        child: Tooltip(
-          message: name,
-          child: Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13,
-              color: Theme.of(context).textTheme.bodyMedium?.color,
-            ),
+      if (name.isEmpty) return const SizedBox.shrink();
+
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 260),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Image.asset(
+                'assets/rh_store_logo.png',
+                width: 72,
+                height: 72,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(height: 16),
+              Tooltip(
+                message: name,
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-      ).marginOnly(right: 8);
+      );
     });
   }
 }

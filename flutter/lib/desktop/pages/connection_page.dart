@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common/rh_store.dart';
 import 'package:flutter_hbb/common/widgets/connection_page_title.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/widgets/popup_menu.dart';
@@ -310,8 +311,11 @@ class _ConnectionPageState extends State<ConnectionPage>
             child: Column(
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Flexible(child: _buildRemoteIDTextField(context)),
+                if (!bind.isIncomingOnly())
+                  const Expanded(child: StoreNameHomeBadge()),
               ],
             ).marginOnly(top: 22),
             SizedBox(height: 12),
