@@ -729,7 +729,7 @@ class App: Reactor.Component
                         {!outgoing_only && <PasswordArea />}
                     </div>
                     {(!is_win || handler.is_installed() || disable_installation) ? "" : <InstallMe />}
-                    // 仁和堂定制版：已移除更新/升级提醒。
+                    // Renhetang custom build: update and upgrade prompts removed.
                     {""}
                     {""}
                     {is_can_screen_recording ? "": <CanScreenRecording />}
