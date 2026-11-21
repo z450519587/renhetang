@@ -31,6 +31,106 @@ LExit:
     return WcaFinalize(er);
 }
 
+// ===== 仁和堂定制：开机自动以最高权限启动托盘（计划任务）=====
+// 背景：程序 exe 声明了 requireAdministrator（双击弹 UAC，便于被控端操作管理员窗口）。
+// Windows 不允许从"启动文件夹"自动运行需要提权的程序（UAC 会静默拦截），
+// 因此改用"登录时触发、以最高权限运行"的计划任务来启动 --tray。
+// 用 schtasks.exe（与本项目现有 sc/netsh 调用同一套 ShellExecuteW 模式）。
+
+// 运行 schtasks 子命令（create/delete/query），参数里允许带引号路径。
+static BOOL RunSchTasks(LPCWSTR args)
+{
+    HINSTANCE hi = ShellExecuteW(NULL, L"open", L"schtasks", args, NULL, SW_HIDE);
+    if ((int)hi <= 32) {
+        WcaLog(LOGMSG_STANDARD, "schtasks failed, args: %ls, error: %d", args, (int)hi);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+// deferred 自定义动作必须通过 CustomActionData 传参（普通属性不会传入延迟阶段）。
+// CustomActionData 格式与 CreateStartService 一致：任务名;exe完整路径，代码里用 ';' 拆分。
+UINT __stdcall CreateAutostartTask(__in MSIHANDLE hInstall)
+{
+    HRESULT hr = S_OK;
+    DWORD er = ERROR_SUCCESS;
+    LPWSTR pwzData = NULL;
+    LPWSTR pwz = NULL;
+    LPWSTR caData = NULL;
+    LPWSTR exePath = NULL;
+    wchar_t szCmd[2048] = { 0 };
+
+    hr = WcaInitialize(hInstall, "CreateAutostartTask");
+    ExitOnFailure(hr, "Failed to initialize CreateAutostartTask");
+
+    hr = WcaGetProperty(L"CustomActionData", &pwzData);
+    ExitOnFailure(hr, "CreateAutostartTask: failed to get CustomActionData");
+
+    pwz = pwzData;
+    hr = WcaReadStringFromCaData(&pwz, &caData);
+    ExitOnFailure(hr, "CreateAutostartTask: failed to read data");
+
+    // 拆成 任务名;exe路径（路径本身不含 ';'，与 CreateStartService 同样假设）
+    exePath = wcschr(caData, L';');
+    if (exePath == NULL) {
+        WcaLog(LOGMSG_STANDARD, "CreateAutostartTask: bad data: %ls", caData);
+        goto LExit;
+    }
+    exePath[0] = L'\0';
+    exePath += 1;
+
+    // 先删旧任务（/f 强制），避免版本变化时残留旧路径；不存在时忽略错误。
+    hr = StringCchPrintfW(szCmd, 2048, L"/delete /tn \"%ls\" /f", caData);
+    ExitOnFailure(hr, "CreateAutostartTask: failed to compose delete command");
+    RunSchTasks(szCmd);
+
+    // /sc onlogon 登录时触发；/rl highest 最高权限（管理员安装时可用）；
+    // /tr 整体用双引号包裹，内部 exe 路径用单引号，兼容含空格的中文路径。
+    // 例：/create /tn "X" /tr "'C:\Program Files\RustDesk\RustDesk.exe' --tray" /sc onlogon /rl highest /f
+    hr = StringCchPrintfW(szCmd, 2048,
+        L"/create /tn \"%ls\" /tr \"'%ls' --tray\" /sc onlogon /rl highest /f",
+        caData, exePath);
+    ExitOnFailure(hr, "CreateAutostartTask: failed to compose create command");
+    WcaLog(LOGMSG_STANDARD, "CreateAutostartTask: %ls", szCmd);
+    RunSchTasks(szCmd);
+
+LExit:
+    if (pwzData) ReleaseStr(pwzData);
+    er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+    return WcaFinalize(er);
+}
+
+// 卸载时删除计划任务。CustomActionData = 任务名。
+UINT __stdcall DeleteAutostartTask(__in MSIHANDLE hInstall)
+{
+    HRESULT hr = S_OK;
+    DWORD er = ERROR_SUCCESS;
+    LPWSTR pwzData = NULL;
+    LPWSTR pwz = NULL;
+    LPWSTR taskName = NULL;
+    wchar_t szCmd[1024] = { 0 };
+
+    hr = WcaInitialize(hInstall, "DeleteAutostartTask");
+    ExitOnFailure(hr, "Failed to initialize DeleteAutostartTask");
+
+    hr = WcaGetProperty(L"CustomActionData", &pwzData);
+    ExitOnFailure(hr, "DeleteAutostartTask: failed to get CustomActionData");
+
+    pwz = pwzData;
+    hr = WcaReadStringFromCaData(&pwz, &taskName);
+    ExitOnFailure(hr, "DeleteAutostartTask: failed to read task name");
+
+    hr = StringCchPrintfW(szCmd, 1024, L"/delete /tn \"%ls\" /f", taskName);
+    ExitOnFailure(hr, "DeleteAutostartTask: failed to compose command");
+    WcaLog(LOGMSG_STANDARD, "DeleteAutostartTask: %ls", szCmd);
+    RunSchTasks(szCmd);
+
+LExit:
+    if (pwzData) ReleaseStr(pwzData);
+    er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+    return WcaFinalize(er);
+}
+
 // Helper function to safely delete a file using handle-based deletion.
 // Directories are refused after opening the handle.
 BOOL SafeDeleteItem(LPCWSTR fullPath)
