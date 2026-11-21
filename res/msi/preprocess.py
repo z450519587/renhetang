@@ -17,6 +17,10 @@ g_indent_unit = "\t"
 g_version = ""
 g_build_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
+# 用户可见的产品显示名。必须与 --app-name（内部 exe 名/服务名/注册表键/升级码种子）
+# 分开：改内部名会让打包脚本找不到 <app-name>.exe，导致构建失败。
+DEFAULT_DISPLAY_NAME = "仁和堂专用远程工具"
+
 # Replace the following links with your own in the custom arp properties.
 # https://learn.microsoft.com/en-us/windows/win32/msi/property-reference
 g_arpsystemcomponent = {
@@ -81,7 +85,13 @@ def make_parser():
         help='Connection type, e.g. "incoming", "outgoing". Default is empty, means incoming-outgoing',
     )
     parser.add_argument(
-        "--app-name", type=str, default="RustDesk", help="The app name."
+        "--app-name", type=str, default="RustDesk", help="The internal app name (exe/service/registry id)."
+    )
+    parser.add_argument(
+        "--display-name",
+        type=str,
+        default=DEFAULT_DISPLAY_NAME,
+        help="The user-visible product name shown in Control Panel, shortcuts and installer UI.",
     )
     parser.add_argument(
         "-v", "--version", type=str, default="", help="The app version."
@@ -250,7 +260,8 @@ def gen_pre_vars(args, dist_dir):
             f'{indent}<?define Version="{g_version}" ?>\n',
             f'{indent}<?define Manufacturer="{args.manufacturer}" ?>\n',
             f'{indent}<?define Product="{args.app_name}" ?>\n',
-            f'{indent}<?define Description="{args.app_name} Installer" ?>\n',
+            f'{indent}<?define ProductDisplayName="{args.display_name}" ?>\n',
+            f'{indent}<?define Description="{args.display_name} Installer" ?>\n',
             f'{indent}<?define ProductLower="{args.app_name.lower()}" ?>\n',
             f'{indent}<?define RegKeyRoot=".$(var.ProductLower)" ?>\n',
             f'{indent}<?define RegKeyInstall="$(var.RegKeyRoot)\\Install" ?>\n',
@@ -270,13 +281,15 @@ def gen_pre_vars(args, dist_dir):
     )
 
 
-def replace_app_name_in_langs(app_name):
+def replace_app_name_in_langs(display_name):
+    # 语言文件里的 "RustDesk" 都是用户可见文案（快捷方式名、开始菜单项、安装向导），
+    # 应替换成产品显示名，而不是内部 exe 名。
     langs_dir = Path(sys.argv[0]).parent.joinpath("Package/Language")
     for file_path in langs_dir.glob("*.wxl"):
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         for i, line in enumerate(lines):
-            lines[i] = line.replace("RustDesk", app_name)
+            lines[i] = line.replace("RustDesk", display_name)
         with open(file_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
 
@@ -568,4 +581,4 @@ if __name__ == "__main__":
     if not gen_custom_dialog_bitmaps():
         sys.exit(-1)
 
-    replace_app_name_in_langs(args.app_name)
+    replace_app_name_in_langs(args.display_name)

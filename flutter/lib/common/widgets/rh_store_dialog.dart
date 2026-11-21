@@ -56,7 +56,8 @@ void showRhStoreSetupDialog() {
 
     if (result.ok) {
       finish();
-      showToast('店名已同步到仁和堂服务器');
+      showToast(
+          result.warning.isNotEmpty ? result.warning : '店名已同步到仁和堂服务器');
     } else {
       refresh(() {
         submitting = false;

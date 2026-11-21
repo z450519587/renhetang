@@ -44,6 +44,9 @@ class RhStoreConfig {
   static const String keyStoreNote = 'rh-store-note';
   static const String keySetupDone = 'rh-store-setup-done';
   static const String keyStoreCache = 'rh-store-cache';
+  // 设备别名补写待办：首次配置时若设备管理暂未收录该设备，标记后由启动时重试，
+  // 避免把"后台还没这条记录"变成用户永远点不动的死结。
+  static const String keyDeviceWritePending = 'rh-device-write-pending';
 
   // 店名输入占位示例。
   static const String storeNamePlaceholder = '例如：仁和堂临沂解放路店';
@@ -76,9 +79,12 @@ class RhStoreRecord {
 class SyncResult {
   final bool ok;
   final String error;
-  SyncResult._(this.ok, this.error);
-  factory SyncResult.success() => SyncResult._(true, '');
-  factory SyncResult.failure(String e) => SyncResult._(false, e);
+  /// 非致命提示：核心同步已完成，但有可稍后重试的项（如设备别名）。
+  final String warning;
+  SyncResult._(this.ok, this.error, this.warning);
+  factory SyncResult.success({String warning = ''}) =>
+      SyncResult._(true, '', warning);
+  factory SyncResult.failure(String e) => SyncResult._(false, e, '');
 }
 
 class RhStoreService {
@@ -117,8 +123,17 @@ class RhStoreService {
     }
     final json = jsonDecode(utf8.decode(resp.bodyBytes));
     if (json is Map<String, dynamic>) {
+      // 兼容 code 为 int / num / 字符串三种服务端写法，避免漏判失败。
       final code = json['code'];
-      if (code is int && code != 0) {
+      int? codeNum;
+      if (code is int) {
+        codeNum = code;
+      } else if (code is num) {
+        codeNum = code.toInt();
+      } else if (code is String) {
+        codeNum = int.tryParse(code);
+      }
+      if (codeNum != null && codeNum != 0) {
         throw '$action失败：${json['message'] ?? code}';
       }
     }
@@ -185,6 +200,13 @@ class RhStoreService {
 
   Future<void> markSetupDone() async =>
       await bind.mainSetLocalOption(key: RhStoreConfig.keySetupDone, value: 'Y');
+
+  Future<bool> isDeviceWritePending() async =>
+      await bind.mainGetLocalOption(key: RhStoreConfig.keyDeviceWritePending) == 'Y';
+
+  Future<void> setDeviceWritePending(bool pending) async => await bind
+      .mainSetLocalOption(
+          key: RhStoreConfig.keyDeviceWritePending, value: pending ? 'Y' : 'N');
 
   /// 本地记录缓存：用于「共享通讯录中被删除的门店，再次同步时恢复」。
   Future<List<RhStoreRecord>> loadCache() async {
@@ -316,6 +338,9 @@ class RhStoreService {
         return '设备管理未找到设备 $deviceId，请确认设备已连接专属服务器后重试';
       }
 
+      // 幂等：别名已经正确就直接返回，便于启动补写时避免无意义的重复请求。
+      if ((deviceRow['alias'] ?? '').toString() == rec.name) return null;
+
       final body = <String, dynamic>{
         'row_id': deviceRow['row_id'],
         'id': deviceId,
@@ -367,16 +392,27 @@ class RhStoreService {
       final rec = RhStoreRecord(deviceId: deviceId, name: name, note: note);
 
       // 双向同步：共享通讯录（address_book）+ 设备管理（peer）。
+      // 地址簿是核心，必须成功；设备管理即使暂未收录该设备，也不能把用户
+      // 卡在首次配置弹窗里 —— 落一个待办标记，启动时再补写。
       await upsertPeer(rec);
-      final deviceError = await writeDeviceInfo(deviceId, rec);
-      if (deviceError != null) return SyncResult.failure(deviceError);
+      String? deviceError;
+      try {
+        deviceError = await writeDeviceInfo(deviceId, rec);
+      } catch (e) {
+        deviceError = '$e';
+      }
 
       // 成功后持久化到本地，后续不再弹窗。
       await setStoreName(name);
       await setStoreNote(note);
       await upsertCache(rec);
       await markSetupDone();
+      await setDeviceWritePending(deviceError != null);
       currentStoreName.value = name;
+      if (deviceError != null) {
+        debugPrint('rh_store submitStoreName: 设备别名待补写: $deviceError');
+        return SyncResult.success(warning: '店名已保存，设备别名将在下次启动时自动补写');
+      }
       return SyncResult.success();
     } catch (e) {
       return SyncResult.failure(e.toString());
@@ -413,6 +449,23 @@ class RhStoreService {
           currentStoreName.value = remoteAlias;
           await upsertCache(RhStoreRecord(
               deviceId: deviceId, name: remoteAlias, note: remoteAlias));
+        }
+      }
+
+      // 补写首次配置时未完成的项目前，用最新的店名（远程可能刚覆盖过）。
+      final currentName = await getStoreName();
+      final effectiveName = currentName.isNotEmpty ? currentName : name;
+      final effectiveRec = RhStoreRecord(
+          deviceId: deviceId, name: effectiveName, note: local.note);
+
+      // 补写首次配置时失败的设备管理别名；成功后清除待办，成功后不重复写入（幂等）。
+      if (await isDeviceWritePending()) {
+        final err = await writeDeviceInfo(deviceId, effectiveRec);
+        if (err == null) {
+          await setDeviceWritePending(false);
+          debugPrint('rh_store syncOnStart: 设备别名补写成功');
+        } else {
+          debugPrint('rh_store syncOnStart: 设备别名补写待重试: $err');
         }
       }
     } catch (e) {
