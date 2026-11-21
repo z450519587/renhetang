@@ -69,6 +69,11 @@ lazy_static::lazy_static! {
     pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
     pub static ref APP_NAME: RwLock<String> = RwLock::new("仁和堂专用远程工具".to_owned());
+    // 配置文件/日志目录使用的固定内部标识。必须与 MSI 安装的内部标识（RustDesk）保持一致：
+    // APP_NAME 是中文显示名，若用它拼配置路径，会导致升级/重装后读写到新目录，读不到旧的设备 ID
+    // 与配置（日志出现 "ID is invalid, generating new one"）。此常量只用于持久化路径，不影响
+    // 服务名、注册表键、IPC 管道、URI 协议等仍由 APP_NAME 决定的部分。
+    pub static ref CONFIG_IDENTITY: String = "RustDesk".to_owned();
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
@@ -876,7 +881,7 @@ impl Config {
     }
 
     fn file_(suffix: &str) -> PathBuf {
-        let name = format!("{}{}", *APP_NAME.read().unwrap(), suffix);
+        let name = format!("{}{}", *CONFIG_IDENTITY, suffix);
         Config::with_extension(Self::path(name))
     }
 
@@ -931,7 +936,7 @@ impl Config {
             let org = ORG.read().unwrap().clone();
             // /var/root for root
             if let Some(project) =
-                directories_next::ProjectDirs::from("", &org, &APP_NAME.read().unwrap())
+                directories_next::ProjectDirs::from("", &org, &CONFIG_IDENTITY)
             {
                 let mut path = patch(project.config_dir().to_path_buf());
                 path.push(p);
@@ -952,21 +957,21 @@ impl Config {
         #[cfg(target_os = "macos")]
         {
             if let Some(path) = dirs_next::home_dir().as_mut() {
-                path.push(format!("Library/Logs/{}", *APP_NAME.read().unwrap()));
+                path.push(format!("Library/Logs/{}", *CONFIG_IDENTITY));
                 return path.clone();
             }
         }
         #[cfg(target_os = "linux")]
         {
             let mut path = Self::get_home();
-            path.push(format!(".local/share/logs/{}", *APP_NAME.read().unwrap()));
+            path.push(format!(".local/share/logs/{}", *CONFIG_IDENTITY));
             std::fs::create_dir_all(&path).ok();
             return path;
         }
         #[cfg(target_os = "android")]
         {
             let mut path = Self::get_home();
-            path.push(format!("{}/Logs", *APP_NAME.read().unwrap()));
+            path.push(format!("{}/Logs", *CONFIG_IDENTITY));
             std::fs::create_dir_all(&path).ok();
             return path;
         }
@@ -2648,7 +2653,7 @@ pub struct Ab {
 
 impl Ab {
     fn path() -> PathBuf {
-        let filename = format!("{}_ab", APP_NAME.read().unwrap().clone());
+        let filename = format!("{}_ab", *CONFIG_IDENTITY);
         Config::path(filename)
     }
 
@@ -2778,7 +2783,7 @@ pub struct Group {
 
 impl Group {
     fn path() -> PathBuf {
-        let filename = format!("{}_group", APP_NAME.read().unwrap().clone());
+        let filename = format!("{}_group", *CONFIG_IDENTITY);
         Config::path(filename)
     }
 
