@@ -1346,9 +1346,21 @@ fn get_subkey(name: &str, wow: bool) -> String {
     }
 }
 
+// 仁和堂定制版：界面/显示名是中文（APP_NAME），但 MSI 安装包内部用英文标识 RustDesk
+// 写注册表键与安装目录（Software\RustDesk\InstallState\RustDesk、C:\Program Files\RustDesk）。
+// 安装状态检测必须同时认这两种标识，否则 MSI 装好后程序仍误判为“未安装版本”。
+const MSI_INSTALL_APP_NAME: &str = "RustDesk";
+
 fn get_valid_subkey() -> String {
     let app_name = crate::get_app_name();
     let subkey = format!("{HKLM_PREFIX}Software\\{app_name}\\InstallState\\{app_name}");
+    if !get_reg_of(&subkey, "InstallLocation").is_empty() {
+        return subkey;
+    }
+    // MSI 安装的英文注册表键（优先于 IS1/Uninstall 兜底）。
+    let subkey = format!(
+        "{HKLM_PREFIX}Software\\{MSI_INSTALL_APP_NAME}\\InstallState\\{MSI_INSTALL_APP_NAME}"
+    );
     if !get_reg_of(&subkey, "InstallLocation").is_empty() {
         return subkey;
     }
@@ -1361,6 +1373,15 @@ fn get_valid_subkey() -> String {
         return subkey;
     }
     let subkey = get_subkey(&app_name, true);
+    if !get_reg_of(&subkey, "InstallLocation").is_empty() {
+        return subkey;
+    }
+    // MSI 安装的英文 Uninstall 键。
+    let subkey = get_subkey(MSI_INSTALL_APP_NAME, true);
+    if !get_reg_of(&subkey, "InstallLocation").is_empty() {
+        return subkey;
+    }
+    let subkey = get_subkey(MSI_INSTALL_APP_NAME, false);
     if !get_reg_of(&subkey, "InstallLocation").is_empty() {
         return subkey;
     }
@@ -1444,7 +1465,14 @@ fn get_default_install_path() -> String {
             pf = tmp;
         }
     }
-    format!("{}\\{}", pf, crate::get_app_name())
+    let app_name = crate::get_app_name();
+    let zh_path = format!("{}\\{}", pf, app_name);
+    // 仁和堂定制版：MSI 实际装在英文目录（C:\Program Files\RustDesk）。
+    let en_path = format!("{}\\{}", pf, MSI_INSTALL_APP_NAME);
+    if !std::path::Path::new(&zh_path).exists() && std::path::Path::new(&en_path).exists() {
+        return en_path;
+    }
+    zh_path
 }
 
 pub fn check_update_broker_process() -> ResultType<()> {
@@ -1502,7 +1530,15 @@ fn get_install_info_with_subkey(subkey: String) -> (String, String, String, Stri
         "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{}",
         crate::get_app_name()
     );
-    let exe = format!("{}\\{}.exe", path, crate::get_app_name());
+    let app_name = crate::get_app_name();
+    let exe = format!("{}\\{}.exe", path, app_name);
+    // 仁和堂定制版：MSI 安装目录里是英文 exe（RustDesk.exe），中文名 exe 并不存在。
+    // 中文名 exe 找不到时回退到 MSI 的真实 exe 名，供安装状态检测判断文件是否存在。
+    let exe = if std::path::Path::new(&exe).exists() {
+        exe
+    } else {
+        format!("{}\\{}.exe", path, MSI_INSTALL_APP_NAME)
+    };
     (subkey, path, start_menu, exe)
 }
 
