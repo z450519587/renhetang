@@ -38,18 +38,20 @@ use hbb_common::{sysinfo::Pid, ResultType};
 use std::sync::{Arc, Mutex};
 
 // Restrict names because installers interpolate them into privileged scripts and paths.
+// 仁和堂定制版：允许中文等 Unicode 字母数字作为应用名（品牌名"仁和堂专用远程工具"），
+// 仍严格拒绝空白、标点、引号、控制字符等任何可能被 cmd/pgrep 解释的特殊字符，避免命令注入。
 #[cfg(any(windows, target_os = "macos"))]
 fn validate_install_app_name(app_name: &str) -> ResultType<()> {
-    let mut bytes = app_name.bytes();
-    let Some(first) = bytes.next() else {
+    let mut chars = app_name.chars();
+    let Some(first) = chars.next() else {
         hbb_common::bail!("Application name must not be empty.");
     };
     // Keep leading hyphens valid on Windows for existing custom clients. macOS
     // rejects them because pgrep interprets a leading hyphen as an option.
     let valid_first =
-        first.is_ascii_alphanumeric() || first == b'_' || (cfg!(windows) && first == b'-');
+        first.is_alphanumeric() || first == '_' || (cfg!(windows) && first == '-');
     if !valid_first
-        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        || !chars.all(|c: char| c.is_alphanumeric() || c == '-' || c == '_')
     {
         let valid_prefix = if cfg!(windows) {
             "a letter, number, underscore, or hyphen"
@@ -253,10 +255,22 @@ mod tests {
             "1RustDesk",
             "_RustDesk",
             "Rust_Desk",
+            // 仁和堂定制版：中文品牌名及其混合形式必须被接受。
+            "仁和堂专用远程工具",
+            "仁和堂-Remote_1",
         ] {
             assert!(validate_install_app_name(app_name).is_ok(), "{app_name}");
         }
-        for app_name in ["", "Rust.Desk", "Rust Desk", "RüstDesk", "RustDesk;touch"] {
+        for app_name in [
+            "",
+            "Rust.Desk",
+            "Rust Desk",
+            "RustDesk;touch",
+            // 空白/控制字符/脚本元字符仍必须拒绝，防止命令注入。
+            "仁和堂 专用",
+            "仁和堂&calc",
+            "仁和堂\ncalc",
+        ] {
             assert!(validate_install_app_name(app_name).is_err(), "{app_name}");
         }
 
