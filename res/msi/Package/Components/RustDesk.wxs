@@ -20,6 +20,10 @@
 
 		<CustomAction Id="LaunchApp" ExeCommand="" Return="asyncNoWait" FileRef="App.exe" />
 		<CustomAction Id="LaunchAppTray" ExeCommand=" --tray" Return="asyncNoWait" FileRef="App.exe" />
+		<!-- 仁和堂定制：创建"登录时以最高权限运行"的计划任务启动托盘，任务名固定便于卸载删除 -->
+		<!-- CustomActionData 格式：任务名;exe完整路径（与 CreateStartService 同构，用 ';' 分隔） -->
+		<CustomAction Id="CreateAutostartTask.SetParam" Return="check" Property="CreateAutostartTask" Value="$(var.Product) Tray;[INSTALLFOLDER_INNER]$(var.Product).exe" />
+		<CustomAction Id="DeleteAutostartTask.SetParam" Return="check" Property="DeleteAutostartTask" Value="$(var.Product) Tray" />
 		<Property Id="TerminateProcesses" Value="AppTest.exe" />
 		<CustomAction Id="TerminateProcesses.SetParam" Return="check" Property="TerminateProcesses" Value="$(var.Product).exe" />
 		<CustomAction Id="TerminateBrokers.SetParam" Return="check" Property="TerminateProcesses" Value="RuntimeBroker_rustdesk.exe" />
@@ -53,6 +57,10 @@
 			<!-- (Installed AND REMOVE AND NOT UPGRADINGPRODUCTCODE) means uninstalling. -->
 			<Custom Action="CreateStartService" Before="InstallFinalize" Condition="(NOT (Installed AND REMOVE AND NOT UPGRADINGPRODUCTCODE)) AND (NOT STOP_SERVICE=&quot;&apos;Y&apos;&quot;) AND (NOT CC_CONNECTION_TYPE=&quot;outgoing&quot;)" />
 			<Custom Action="CreateStartService.SetParam" Before="CreateStartService" Condition="(NOT (Installed AND REMOVE AND NOT UPGRADINGPRODUCTCODE)) AND (NOT STOP_SERVICE=&quot;&apos;Y&apos;&quot;) AND (NOT CC_CONNECTION_TYPE=&quot;outgoing&quot;)" />
+
+			<!-- 仁和堂定制：安装时创建开机提权自启托盘任务 -->
+			<Custom Action="CreateAutostartTask" Before="InstallFinalize" Condition="(NOT (Installed AND REMOVE AND NOT UPGRADINGPRODUCTCODE)) AND (NOT STOP_SERVICE=&quot;&apos;Y&apos;&quot;) AND (NOT CC_CONNECTION_TYPE=&quot;outgoing&quot;)" />
+			<Custom Action="CreateAutostartTask.SetParam" Before="CreateAutostartTask" Condition="(NOT (Installed AND REMOVE AND NOT UPGRADINGPRODUCTCODE)) AND (NOT STOP_SERVICE=&quot;&apos;Y&apos;&quot;) AND (NOT CC_CONNECTION_TYPE=&quot;outgoing&quot;)" />
 
 			<Custom Action="CustomActionHello" Before="InstallFinalize" />
 
@@ -88,6 +96,9 @@
 			<Custom Action="RemoveRuntimeGeneratedFiles.SetParam" Before="RemoveRuntimeGeneratedFiles" Condition="Installed AND (REMOVE=&quot;ALL&quot; OR UPGRADINGPRODUCTCODE)"/>
 			<Custom Action="TryStopDeleteService" Before="RemoveRuntimeGeneratedFiles.SetParam" />
 			<Custom Action="TryStopDeleteService.SetParam" Before="TryStopDeleteService" />
+			<!-- 仁和堂定制：卸载时删除开机自启任务 -->
+			<Custom Action="DeleteAutostartTask" Before="RemoveRuntimeGeneratedFiles.SetParam" />
+			<Custom Action="DeleteAutostartTask.SetParam" Before="DeleteAutostartTask" />
 
 			<Custom Action="RemoveFirewallRules" Before="RemoveFiles"/>
 			<Custom Action="RemoveFirewallRules.SetParam" Before="RemoveFirewallRules"/>
