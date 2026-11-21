@@ -21,6 +21,14 @@ add_executable(${BINARY_NAME} WIN32
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
 
+# 仁和堂定制：以管理员权限运行（UAC 提权）。
+# 必须通过链接器 /MANIFESTUAC 声明，不能在 runner.exe.manifest 里写 trustInfo——
+# 否则 MSVC 默认注入的 asInvoker 片段与清单里的 requireAdministrator 冲突，
+# mt.exe 合并失败报 LNK1327 (failure during running mt.exe)。
+if(MSVC)
+  target_link_options(${BINARY_NAME} PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+endif()
+
 # Add preprocessor definitions for the build version.
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")
