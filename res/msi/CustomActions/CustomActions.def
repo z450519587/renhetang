@@ -2,6 +2,8 @@ LIBRARY "CustomActions"
 
 EXPORTS
     CustomActionHello
+    CreateAutostartTask
+    DeleteAutostartTask
     RemoveRuntimeGeneratedFiles
     TerminateProcesses
     AddFirewallRules
